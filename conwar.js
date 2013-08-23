@@ -1,5 +1,5 @@
 (function() {
-  var key, i, x, y;
+  var i, x, y;
 
   var CELL = {
     DEAD: 0,
@@ -25,8 +25,9 @@
 
   var config = {
     speed: 500, // ms to wait between frames.
-    size: {x: 160, y: 120},
-  }
+    size: {x: 80, y: 60},
+    cellSize: 10,
+  };
   var urlParams = queryParams(window.location.href);
   if (urlParams.speed) {
     config.speed = urlParams.speed
@@ -52,19 +53,19 @@
   var red = CELL.ALIVE | CELL.P1;
   var blue = CELL.ALIVE | CELL.P2;
   var neutral = CELL.ALIVE;
-  boards[0][81][49] = red;
-  boards[0][80][49] = red;
-  boards[0][80][50] = red;
-  boards[0][79][50] = red;
-  boards[0][80][51] = red;
+  boards[0][56][29] = red;
+  boards[0][55][29] = red;
+  boards[0][55][30] = red;
+  boards[0][54][30] = red;
+  boards[0][55][31] = red;
 
-  boards[0][50][49] = blue;
-  boards[0][51][49] = blue;
-  boards[0][51][51] = blue;
-  boards[0][53][50] = blue;
-  boards[0][54][49] = blue;
-  boards[0][55][49] = blue;
-  boards[0][56][49] = blue;
+  boards[0][20][29] = blue;
+  boards[0][21][29] = blue;
+  boards[0][21][31] = blue;
+  boards[0][23][30] = blue;
+  boards[0][24][29] = blue;
+  boards[0][25][29] = blue;
+  boards[0][26][29] = blue;
 
   var generation = 0;
 
@@ -78,18 +79,37 @@
   var ctx = c.getContext('2d');
   ctx.mozImageSmoothingEnabled = false;
 
+  var down = null;
+
+  function eventCell(e) {
+    var x = Math.floor((e.clientX - c.offsetLeft) / config.cellSize);
+    var y = Math.floor((e.clientY - c.offsetTop) / config.cellSize);
+    return [x, y];
+  }
+
+  function toggleCell(x, y, extra) {
+    var cell = board(x, y);
+    var newState = cell & CELL.ALIVE ? CELL.DEAD : CELL.ALIVE | extra;
+    boards[generation % 2][x][y] = newState;
+    return newState;
+  }
+
+  c.addEventListener('mousedown', function(e) {
+    var pos = eventCell(e);
+    down = toggleCell(pos[0], pos[1]);
+    draw();
+  });
+  c.addEventListener('mousemove', function(e) {
+    if (down === null) return;
+    var pos = eventCell(e);
+    boards[generation % 2][pos[0]][pos[1]] = down;
+    draw();
+  });
+  c.addEventListener('mouseup', function(e) {
+    down = null;
+  });
+
   boardDiv.appendChild(c);
-
-  var s = 1;
-  var cx=0, cy=0;
-
-  var as = 1;
-  var acx=0, acy=0;
-
-  ctx.fillStyle="#fff";
-  ctx.strokeStyle="#ccc";
-
-  var stime = Date.now();
 
   function step() {
     stats.end();
@@ -189,17 +209,14 @@
 
   function draw() {
     var x, y;
-    var size = 5;
-    // ctx.fillStyle = '#eee';
-    // ctx.fillRect(0,0,width,height);
 
     for (x = 0; x < boards[0].length; x++) {
       for (y = 0; y < boards[0][0].length; y++) {
         ctx.fillStyle = cellColors[board(x, y)] || '#f0f';
-        ctx.fillRect(x * size, y * size, size, size);
+        ctx.fillRect(x * config.cellSize, y * config.cellSize,
+                     config.cellSize, config.cellSize);
       }
     }
-    stats.end();
   }
 
   draw();
