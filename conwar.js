@@ -94,6 +94,7 @@
       onlineRef.onDisconnect().set(null);
     }
   });
+  onlineRef.set('online');
   gameRef.child('players/online').on('value', function(snap) {
     var count = 0;
     var val = snap.val();
@@ -103,6 +104,7 @@
       }
     }
     numPlayers = count;
+    draw();
   });
 
   (function makeColorSelector() {
@@ -129,6 +131,13 @@
       playerColor = parseFloat(e.target.value);
     });
   })();
+
+  var startButton = document.createElement('button');
+  startButton.innerHTML = 'Start';
+  startButton.addEventListener('click', function(e) {
+    readyForNextStep();
+  });
+  document.querySelector('.controls .time').appendChild(startButton);
 
   var down = null;
   function eventCell(e) {
@@ -295,9 +304,6 @@
        'Generation ' + generation + '. ' + numPlayers + ' players.';
   }
 
-  function updateFirebase() {
-  }
-
   var inputQueue = [];
   inputRef.on('child_added', function(snapshot) {
     var change = snapshot.val();
@@ -328,15 +334,12 @@
   }
   gameRef.child('players/ready').on('value', function(snap) {
     var val = snap.val();
-    console.log(val[generation], '/', numPlayers, 'players ready on gen', generation);
     if (val && val[generation] >= numPlayers) {
-      console.log('step');
       setTimeout(step, 0);
     }
   });
 
   draw();
-  setTimeout(readyForNextStep, config.speed);
 
   function queryParams() {
     var url = window.location.href;
