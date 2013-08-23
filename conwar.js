@@ -15,20 +15,14 @@
                      window.mozRequestAnimationFrame ||
                      window.msRequestAnimationFrame;
 
-  var stats = new Stats();
-  stats.setMode(1); // 0: fps, 1: ms
-  // Align top-left
-  stats.domElement.style.position = 'absolute';
-  stats.domElement.style.left = '0px';
-  stats.domElement.style.bottom = '0px';
-  document.body.appendChild( stats.domElement );
-
   var config = {
-    speed: 500, // ms to wait between frames.
+    speed: 3000, // ms to wait between frames.
     size: {x: 80, y: 60},
     cellSize: 10,
+    gameId: randomID(),
+    playerId: randomID(),
   };
-  var urlParams = queryParams(window.location.href);
+  var urlParams = queryParams();
   if (urlParams.speed) {
     config.speed = urlParams.speed
   }
@@ -37,9 +31,15 @@
     config.size.x = split[0];
     config.size.y = split[1];
   }
+  if (urlParams.game) {
+    config.gameId = urlParams.game;
+  } else {
+    updateQueryParams({game: config.gameId});
+  }
 
+  var historySize = 10;
   var boards = [];
-  for (i = 0; i < 2; i++) {
+  for (i = 0; i < historySize; i++) {
     boards[i] = [];
     for (x = 0; x < config.size.x; x++) {
       boards[i][x] = [];
@@ -69,28 +69,81 @@
 
   var generation = 0;
 
-  var boardDiv = document.querySelector('.board');
   var width = 800;
   var height = 600;
 
-  var c = document.createElement('canvas');
+  var c = document.querySelector('.board canvas');
   c.width = width;
   c.height = height;
   var ctx = c.getContext('2d');
   ctx.mozImageSmoothingEnabled = false;
 
-  var down = null;
+  var playerColor = CELL.ALIVE;
+  var inputQueue = [];
+  var numPlayers = 0;
 
+  var firebase = new Firebase('https://gameofwar.firebaseIO.com/');
+  var gameRef = firebase.child('game').child(config.gameId);
+  var inputRef = gameRef.child('input');
+
+  var connectedRef = firebase.child('.info/connected');
+  var onlineRef = gameRef.child('players/online').child(config.playerId);
+  connectedRef.on('value', function(snap) {
+    if (snap.val() === true) {
+      onlineRef.set('online');
+      onlineRef.onDisconnect().set(null);
+    }
+  });
+  gameRef.child('players/online').on('value', function(snap) {
+    var count = 0;
+    var val = snap.val();
+    for (var key in val) {
+      if (val.hasOwnProperty(key)) {
+        count++;
+      }
+    }
+    numPlayers = count;
+  });
+
+  (function makeColorSelector() {
+    var colorSelector = document.querySelector('.controls .color-selector');
+    function colorRadioButton(display, val) {
+      var radioButton = document.createElement('input');
+      radioButton.name = 'player-color';
+      radioButton.type = 'radio';
+      radioButton.value = val;
+
+      var label = document.createElement('label');
+      label.appendChild(radioButton);
+      label.appendChild(document.createTextNode(display));
+      colorSelector.appendChild(label);
+
+      return radioButton;
+    }
+
+    colorRadioButton('Neutral', CELL.ALIVE).checked = true;
+    colorRadioButton('Red', CELL.ALIVE | CELL.P1);
+    colorRadioButton('Blue', CELL.ALIVE | CELL.P2);
+
+    colorSelector.addEventListener('change', function(e) {
+      playerColor = parseFloat(e.target.value);
+    });
+  })();
+
+  var down = null;
   function eventCell(e) {
     var x = Math.floor((e.clientX - c.offsetLeft) / config.cellSize);
     var y = Math.floor((e.clientY - c.offsetTop) / config.cellSize);
     return [x, y];
   }
 
-  function toggleCell(x, y, extra) {
+  function toggleCell(x, y, newState) {
     var cell = board(x, y);
-    var newState = cell & CELL.ALIVE ? CELL.DEAD : CELL.ALIVE | extra;
-    boards[generation % 2][x][y] = newState;
+    newState = newState || (cell & CELL.ALIVE ? CELL.DEAD : playerColor);
+    var p = {x: x, y: y, state: newState, generation: generation}
+    if (board(x, y) !== newState) {
+      inputRef.push(p);
+    }
     return newState;
   }
 
@@ -102,27 +155,43 @@
   c.addEventListener('mousemove', function(e) {
     if (down === null) return;
     var pos = eventCell(e);
-    boards[generation % 2][pos[0]][pos[1]] = down;
+    toggleCell(pos[0], pos[1], down);
     draw();
   });
   c.addEventListener('mouseup', function(e) {
     down = null;
   });
 
-  boardDiv.appendChild(c);
+  var stats = new Stats();
+  stats.setMode(1); // 0: fps, 1: ms
+  // Align top-left
+  stats.domElement.style.position = 'absolute';
+  stats.domElement.style.left = '0px';
+  stats.domElement.style.bottom = '0px';
+  document.body.appendChild( stats.domElement );
+
 
   function step() {
     stats.end();
     stats.begin();
 
+    for (var i = inputQueue.length - 1; i >= 0; i--) {
+      var change = inputQueue[i];
+      if (change.generation === generation) {
+        board(change.x, change.y, change.state);
+        inputQueue.splice(i, 1);
+      }
+    }
+
     var x, y;
     for (x = 0; x < boards[0].length; x++) {
       for (y = 0 ; y < boards[0][0].length; y++) {
-        boards[(generation+1) % 2][x][y] = nextState(x, y);
+        board(x, y, nextState(x, y), true);
       }
     }
-    generation++;
     requestFrame(draw);
+    generation++;
+    setTimeout(readyForNextStep, config.speed);
   }
 
   function nextState(x, y) {
@@ -191,9 +260,13 @@
     return neighbors;
   }
 
-  function board(x, y) {
-    var b = boards[generation % 2];
+  function board(x, y, newVal, next) {
+    var gen = generation + (next | 0);
+    var b = boards[gen % 4];
     var col = b[x];
+    if (newVal !== undefined && col) {
+      col[y] = newVal;
+    }
     return col ? col[y] : CELL.OUT;
   }
 
@@ -217,12 +290,56 @@
                      config.cellSize, config.cellSize);
       }
     }
+
+    document.querySelector('.controls .info').innerHTML =
+       'Generation ' + generation + '. ' + numPlayers + ' players.';
   }
 
-  draw();
-  setInterval(step, config.speed);
+  function updateFirebase() {
+  }
 
-  function queryParams (url) {
+  var inputQueue = [];
+  inputRef.on('child_added', function(snapshot) {
+    var change = snapshot.val();
+    if (change.generation === generation) {
+      board(change.x, change.y, change.state);
+      return;
+    }
+    if (change.generation > generation) {
+      inputQueue.push(change);
+    } else {
+      if (generation - change.generation > historySize - 1) {
+        alert('AHHH Input came in from an old generation. This is bad! ' +
+             'local: ' + generation + ' remote: ' + change.generation);
+        throw 'AHHH Input came in from an old generation. This is bad! ' +
+              'local: ' + generation + ' remote: ' + change.generation;
+      } else {
+        console.log('rolling back to deal with wibble wobbly');
+        generation = change.generation;
+        board(change.x, change.y, change.state);
+      }
+    }
+  });
+
+  function readyForNextStep() {
+    gameRef.child('players/ready').child(generation).transaction(function(val) {
+      return val + 1;
+    });
+  }
+  gameRef.child('players/ready').on('value', function(snap) {
+    var val = snap.val();
+    console.log(val[generation], '/', numPlayers, 'players ready on gen', generation);
+    if (val && val[generation] >= numPlayers) {
+      console.log('step');
+      setTimeout(step, 0);
+    }
+  });
+
+  draw();
+  setTimeout(readyForNextStep, config.speed);
+
+  function queryParams() {
+    var url = window.location.href;
     // Isolate the querystring.
     if (url.indexOf('?') >= 0) {
       url = url.split('?')[1];
@@ -236,5 +353,27 @@
     });
 
     return obj;
+  }
+
+  function updateQueryParams(obj) {
+    var key;
+    var current = queryParams();
+    for (key in obj) {
+      if (!obj.hasOwnProperty(key)) continue;
+      current[key] = obj[key];
+    }
+    var newQuery = '?';
+    for (key in current) {
+      if (!obj.hasOwnProperty(key)) continue;
+      newQuery += key + '=' + obj[key] + '&';
+    }
+    newQuery = newQuery.slice(0, -1);
+    var newUrl = window.location.pathname + newQuery + window.location.hash;
+    window.history.replaceState(null, null, newUrl);
+  }
+  window.updateQueryParams = updateQueryParams;
+
+  function randomID() {
+    return (Math.random() + Math.PI).toString(36).substring(2, 10);
   }
 })();
